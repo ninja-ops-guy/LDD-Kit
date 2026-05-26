@@ -303,7 +303,7 @@ The key insight is that observability systems should not merely *detect* failure
 
 The five-layer safety architecture (kill switch, rate limiting, pre-flight checks, collateral damage detection, approval gates) ensures that autonomous remediation operates within bounded risk, with multiple escalation paths to human operators when uncertainty exceeds calibrated thresholds.
 
-The LDD methodology and self-healing system are available as open-source components at [repository URL]. We encourage the research community and industry practitioners to adopt and extend these patterns.
+The LDD methodology and self-healing system are available as open-source components at https://github.com/ninja-ops-guy/LDD-Kit. We encourage the research community and industry practitioners to adopt and extend these patterns.
 
 ---
 
