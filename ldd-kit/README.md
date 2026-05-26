@@ -1,0 +1,1229 @@
+# LDD-Kit: Generic Log-Driven Development Framework
+
+> Drop-in observability infrastructure that adapts to any software project in &lt;1 hour.
+
+---
+
+## Table of Contents
+
+1. [What is LDD-Kit?](#what-is-ldd-kit)
+2. [Quick Start](#quick-start)
+3. [Supported Languages & Frameworks](#supported-languages--frameworks)
+4. [Supported Platforms](#supported-platforms)
+5. [Adaptation Guide](#adaptation-guide)
+6. [Configuration Reference](#configuration-reference)
+7. [Language-Specific Wiring Guides](#language-specific-wiring-guides)
+8. [Event Schema Guide](#event-schema-guide)
+9. [Dashboard & Alert Customization](#dashboard--alert-customization)
+10. [Kimi Integration](#kimi-integration)
+11. [Migration from Existing Logging](#migration-from-existing-logging)
+12. [Troubleshooting](#troubleshooting)
+13. [Project Structure](#project-structure)
+14. [License](#license)
+
+---
+
+## What is LDD-Kit?
+
+**LDD-Kit** is a language-agnostic, config-driven observability framework that helps you ship production-ready telemetry (structured logging, distributed tracing, Prometheus metrics, Grafana dashboards, and alert rules) in under an hour. It is built around the philosophy of **Log-Driven Development**: you define your event schemas first, and LDD-Kit generates all the telemetry infrastructure from those definitions.
+
+At its core, LDD-Kit is a set of generic templates and an adaptation engine (`adapt.py`) that materializes these templates for your specific service. You describe your service in a single `config.yaml` -- service name, language, framework, platform, observability features, and event domains -- and LDD-Kit generates a complete telemetry package with language-specific adapters, CI templates, Terraform infrastructure, Grafana dashboards, Prometheus alert rules, and a Kimi prompt template for AI-assisted debugging.
+
+Unlike traditional observability SDKs that require manual instrumentation at every call site, LDD-Kit generates idiomatic middleware and handler wrappers that capture telemetry automatically. It supports zero-runtime-dependency fallbacks -- every adapter works in "dev mode" writing to stdout when no external backends are configured -- so your tests and local development never break.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Download
+git clone https://github.com/your-org/ldd-kit
+cd ldd-kit
+
+# 2. Configure
+cp config.yaml.example my-service.yaml
+# Edit my-service.yaml with your service details
+
+# 3. Generate
+python core/scripts/adapt.py --config my-service.yaml --output ./telemetry/
+cd telemetry && pip install -r requirements.txt
+```
+
+That's it. You now have:
+
+- Structured logging with JSON schema validation
+- OpenTelemetry distributed tracing (auto-export to Cloud Trace / X-Ray / Jaeger)
+- Prometheus metrics endpoint at `/metrics`
+- Grafana dashboard JSON files
+- Prometheus alert rules YAML
+- Terraform infrastructure for GCP monitoring, logging, and tracing
+- GitHub Actions / GitLab CI pipeline templates
+- Full event schema validation in CI
+
+Wire the generated telemetry package into your application (see [Language-Specific Wiring Guides](#language-specific-wiring-guides)) and deploy.
+
+---
+
+## Supported Languages & Frameworks
+
+| Language | Frameworks | Status |
+|----------|-----------|--------|
+| Python | FastAPI, Flask, Django | Ready |
+| Go | Gin, Echo, stdlib | Ready |
+| Node.js | Express, Fastify, NestJS | Ready |
+| Rust | Axum, Actix-web | Ready |
+
+---
+
+## Supported Platforms
+
+| Platform | Monitoring | Logging | Tracing |
+|----------|-----------|---------|---------|
+| GCP | Cloud Monitoring | Cloud Logging | Cloud Trace |
+| AWS | CloudWatch | CloudWatch Logs | X-Ray |
+| Azure | Monitor | Log Analytics | Application Insights |
+| Self-hosted | Prometheus | Loki | Tempo / Jaeger |
+
+---
+
+## Adaptation Guide
+
+LDD-Kit is designed around a single adaptation cycle. Follow these 6 steps to customize it for your project.
+
+### Step 1: Edit `config.yaml`
+
+Create your service configuration file. This is the single source of truth for everything LDD-Kit generates.
+
+```yaml
+service:
+  name: my-service           # Your service name (lowercase, hyphenated)
+  language: python           # python | go | nodejs | rust
+  framework: fastapi         # fastapi | flask | gin | echo | express | axum | actix
+  platform: gcp              # gcp | aws | azure | baremetal
+
+features:
+  ai_inference: false        # Enable AI-specific dashboards/metrics
+  multi_tenant: false        # Enable tenant context propagation
+  auth: true                 # Enable auth event schemas
+
+observability:
+  structured_logging: true
+  distributed_tracing: true
+  prometheus_metrics: true
+  grafana_dashboards: true
+  alert_rules: true
+
+events:
+  - domain: user
+    events:
+      - name: user.created
+        fields:
+          user_id: { type: string, required: true }
+          email: { type: string, required: true }
+      - name: user.deleted
+  - domain: payment
+    events:
+      - name: payment.processed
+      - name: payment.failed
+```
+
+### Step 2: Define Your Events
+
+Add your business events to the `events:` section. Each event:
+
+- Belongs to a `domain` (e.g., `user`, `payment`, `order`)
+- Has a `name` that becomes the `event_type` in logs
+- Optionally has typed `fields` for validation and auto-generated schemas
+
+Supported field types: `string`, `integer`, `float`, `boolean`, `datetime`, `uuid`, `enum`.
+
+### Step 3: Run `adapt.py`
+
+```bash
+python core/scripts/adapt.py --config my-service.yaml --output ./telemetry/
+```
+
+This generates:
+
+```
+telemetry/
+├── {{ SERVICE_NAME }}/                    # Language-specific telemetry package
+│   ├── __init__.py                        # Init + auto-instrumentation
+│   ├── logging.py                         # Structured logging (JSON/console)
+│   ├── tracing.py                         # OpenTelemetry tracing
+│   ├── metrics.py                         # Prometheus metrics
+│   ├── middleware.py                      # Framework middleware
+│   └── remediation.py                     # Alert remediation hooks
+├── dashboards/
+│   ├── service-overview.json              # Grafana: requests, errors, latency
+│   ├── service-pipeline.json              # Grafana: business pipeline
+│   └── service-ai-inference.json          # Grafana: AI metrics (if enabled)
+├── alerts/
+│   ├── latency.yml                        # Prometheus: p95 latency alert
+│   ├── error-rate.yml                     # Prometheus: error rate alert
+│   └── resource-exhaustion.yml            # Prometheus: CPU/memory alert
+├── terraform/
+│   ├── main.tf                            # Provider config
+│   ├── variables.tf                       # All Terraform variables
+│   ├── monitoring.tf                      # Alert policies + dashboards
+│   ├── logging.tf                         # Log-based metrics + sinks
+│   ├── trace.tf                           # Cloud Trace config
+│   └── outputs.tf                         # Useful outputs
+├── ci/
+│   ├── github-actions.yml                 # GitHub Actions workflow
+│   └── gitlab-ci.yml                      # GitLab CI pipeline
+├── prompts/
+│   └── ldd-template.md                    # Kimi prompt template
+├── scripts/
+│   └── validate-telemetry.py              # CI validation script
+└── requirements.txt                       # Python deps (if language=python)
+```
+
+### Step 4: Wire Into Your App
+
+Import the generated telemetry package and add the middleware to your server entry point. See [Language-Specific Wiring Guides](#language-specific-wiring-guides) for detailed examples.
+
+### Step 5: Add CI Enforcement
+
+Copy the generated CI workflow into your repository:
+
+```bash
+# For GitHub Actions
+cp telemetry/ci/github-actions.yml .github/workflows/ldd.yml
+
+# For GitLab CI
+cp telemetry/ci/gitlab-ci.yml .gitlab-ci.yml
+```
+
+The CI pipeline enforces:
+
+- Telemetry coverage >= 80% (all endpoints instrumented)
+- Log schema compliance (no ad-hoc log statements)
+- Metric registry consistency (all metrics registered)
+- Dashboard JSON validity
+- Alert rule YAML validity
+
+### Step 6: Deploy with Telemetry Env Vars
+
+```bash
+# Production
+export OTEL_SERVICE_NAME=my-service
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
+export OTEL_TRACES_SAMPLER=parentbased_traceidratio
+export OTEL_TRACES_SAMPLER_ARG=0.1           # 10% sampling
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=json
+
+# Terraform infrastructure
+terraform -chdir=telemetry/terraform init
+terraform -chdir=telemetry/terraform apply \
+  -var="project_id=YOUR_PROJECT" \
+  -var="alert_email=ops@example.com"
+```
+
+---
+
+## Configuration Reference
+
+### `service` block
+
+| Key | Type | Description | Allowed Values |
+|-----|------|-------------|----------------|
+| `name` | string | Service name (used for metrics prefix, resource IDs) | lowercase, hyphens |
+| `language` | string | Primary language | `python`, `go`, `nodejs`, `rust` |
+| `framework` | string | Web framework | `fastapi`, `flask`, `django`, `gin`, `echo`, `express`, `fastify`, `nestjs`, `axum`, `actix` |
+| `platform` | string | Deployment platform | `gcp`, `aws`, `azure`, `baremetal` |
+
+### `features` block
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `ai_inference` | bool | Enable AI-specific dashboards (inference latency, confidence scores, model drift) |
+| `multi_tenant` | bool | Inject `tenant_id` into all logs and traces automatically |
+| `auth` | bool | Generate auth event schemas (login, logout, token refresh) |
+| `rate_limiting` | bool | Add rate limit metrics and alerts |
+| `circuit_breaker` | bool | Add circuit breaker state metrics |
+
+### `observability` block
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `structured_logging` | bool | JSON-structured logs with schema validation |
+| `distributed_tracing` | bool | OpenTelemetry tracing with OTLP export |
+| `prometheus_metrics` | bool | Prometheus metrics endpoint (`/metrics`) |
+| `grafana_dashboards` | bool | Generate Grafana dashboard JSON files |
+| `alert_rules` | bool | Generate Prometheus alert rule YAML files |
+| `slo_tracking` | bool | Add SLO burn rate alerts |
+
+### `events` block
+
+The `events` section is a list of domains, each containing a list of event definitions:
+
+```yaml
+events:
+  - domain: user                    # Domain name (used for metric labels)
+    events:
+      - name: user.created          # Event type (used as event_type in logs)
+        fields:                     # Optional: typed fields for validation
+          user_id: { type: string, required: true }
+          email: { type: string, required: true, format: email }
+          tier: { type: enum, values: [free, pro, enterprise] }
+      - name: user.deleted          # No fields = minimal event
+  - domain: payment
+    events:
+      - name: payment.processed
+        fields:
+          amount_cents: { type: integer, required: true }
+          currency: { type: string, default: "USD" }
+          success: { type: boolean, required: true }
+```
+
+**Field types:**
+
+| Type | JSON Schema | Description |
+|------|-------------|-------------|
+| `string` | `{"type": "string"}` | Arbitrary string |
+| `integer` | `{"type": "integer"}` | Whole number |
+| `float` | `{"type": "number"}` | Floating-point number |
+| `boolean` | `{"type": "boolean"}` | `true` or `false` |
+| `datetime` | `{"type": "string", "format": "date-time"}` | ISO 8601 timestamp |
+| `uuid` | `{"type": "string", "format": "uuid"}` | UUID v4 string |
+| `enum` | `{"type": "string", "enum": [...]}` | One of a set of values |
+| `json` | `{"type": "object"}` | Arbitrary JSON object |
+
+---
+
+## Language-Specific Wiring Guides
+
+### Python / FastAPI
+
+**1. Import and initialize telemetry in your `main.py`:**
+
+```python
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from my_service.telemetry import setup_telemetry, TelemetryMiddleware, get_logger
+from my_service.telemetry.logging import LogContext
+from my_service.telemetry.schemas.user import UserCreated
+
+# Initialize telemetry (call once at startup)
+setup_telemetry(
+    service_name="my-service",
+    environment="production",  # "development" for local
+)
+
+logger = get_logger(__name__)
+
+app = FastAPI(title="My Service")
+
+# Add telemetry middleware (captures all HTTP requests)
+app.add_middleware(TelemetryMiddleware)
+
+# Optional: CORS (add before telemetry middleware if needed)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+async def startup():
+    logger.info("service_starting", port=8000)
+
+@app.on_event("shutdown")
+async def shutdown():
+    logger.info("service_stopping")
+
+# Health check (excluded from telemetry noise)
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# Business route with telemetry instrumentation
+@app.post("/api/v1/users")
+async def create_user(user_id: str, email: str):
+    with LogContext(user_id=user_id, request_path="/api/v1/users"):
+        logger.info("user.creating", user_id=user_id, email=email)
+
+        # ... business logic ...
+
+        event = UserCreated(user_id=user_id, email=email)
+        logger.info("user.created", **event.model_dump())
+
+        return {"user_id": user_id, "status": "created"}
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint (auto-instrumented by middleware)."""
+    from my_service.telemetry.metrics import render_metrics
+    return render_metrics()
+```
+
+**2. Set environment variables:**
+
+```bash
+# development
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=console
+export OTEL_SERVICE_NAME=my-service-local
+export OTEL_TRACES_SAMPLER=always_on
+
+# production
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=json
+export OTEL_SERVICE_NAME=my-service
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
+export OTEL_TRACES_SAMPLER=parentbased_traceidratio
+export OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+### Go / Gin
+
+**1. Import and initialize telemetry in your `main.go`:**
+
+```go
+package main
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"my-service/telemetry"
+	"my-service/telemetry/logging"
+	"my-service/telemetry/schemas"
+)
+
+func main() {
+	// Initialize telemetry
+	shutdown, err := telemetry.Setup(telemetry.Config{
+		ServiceName: "my-service",
+		Environment: "production",
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer shutdown()
+
+	logger := logging.GetLogger("main")
+
+	router := gin.New()
+
+	// Add telemetry middleware (before recovery)
+	router.Use(telemetry.TelemetryMiddleware())
+	router.Use(gin.Recovery())
+
+	// Health check
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	// Business route with telemetry
+	router.POST("/api/v1/users", func(c *gin.Context) {
+		userID := c.PostForm("user_id")
+		email := c.PostForm("email")
+
+		ctx := logging.WithContext(c.Request.Context(), map[string]interface{}{
+			"user_id": userID,
+		})
+
+		logger.Info(ctx, "user.creating", "user_id", userID, "email", email)
+
+		// ... business logic ...
+
+		event := schemas.UserCreated{
+			UserID: userID,
+			Email:  email,
+		}
+		logger.Info(ctx, "user.created",
+			"user_id", event.UserID,
+			"email", event.Email,
+		)
+
+		c.JSON(http.StatusCreated, gin.H{
+			"user_id": userID,
+			"status":  "created",
+		})
+	})
+
+	// Prometheus metrics endpoint
+	router.GET("/metrics", telemetry.MetricsHandler())
+
+	logger.Info(nil, "service_starting", "port", 8080)
+	router.Run(":8080")
+}
+```
+
+**2. Set environment variables:**
+
+```bash
+# development
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=console
+export OTEL_SERVICE_NAME=my-service-local
+export OTEL_TRACES_SAMPLER=always_on
+
+# production
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=json
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
+export OTEL_TRACES_SAMPLER=parentbased_traceidratio
+export OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+### Node.js / Express
+
+**1. Import and initialize telemetry in your `app.ts`:**
+
+```typescript
+import express, { Request, Response } from 'express';
+import {
+  setupTelemetry,
+  telemetryMiddleware,
+  getLogger,
+  LogContext,
+  metricsHandler,
+} from './telemetry';
+import { UserCreated } from './telemetry/schemas';
+
+// Initialize telemetry
+const telemetryShutdown = setupTelemetry({
+  serviceName: 'my-service',
+  environment: 'production',
+});
+
+const logger = getLogger('app');
+
+const app = express();
+app.use(express.json());
+
+// Add telemetry middleware (captures all HTTP requests)
+app.use(telemetryMiddleware);
+
+// Health check
+app.get('/health', (req: Request, res: Response) => {
+  res.json({ status: 'ok' });
+});
+
+// Business route with telemetry
+app.post('/api/v1/users', async (req: Request, res: Response) => {
+  const { user_id, email } = req.body;
+
+  await LogContext.run({ user_id }, async () => {
+    logger.info('user.creating', { user_id, email });
+
+    // ... business logic ...
+
+    const event = new UserCreated(user_id, email);
+    logger.info('user.created', event.toLogFields());
+
+    res.status(201).json({ user_id, status: 'created' });
+  });
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', metricsHandler);
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  logger.info('service_stopping');
+  await telemetryShutdown();
+  process.exit(0);
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  logger.info('service_starting', { port: PORT });
+});
+```
+
+**2. Set environment variables:**
+
+```bash
+# development
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=console
+export OTEL_SERVICE_NAME=my-service-local
+export OTEL_TRACES_SAMPLER=always_on
+
+# production
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=json
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
+export OTEL_TRACES_SAMPLER=parentbased_traceidratio
+export OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+### Rust / Axum
+
+**1. Import and initialize telemetry in your `main.rs`:**
+
+```rust
+use axum::{
+    routing::{get, post},
+    Router, Json, extract::State,
+};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use std::net::SocketAddr;
+
+use my_service_telemetry::{
+    setup_telemetry, TelemetryLayer,
+    get_logger, LogContext,
+    schemas::UserCreated,
+};
+
+#[tokio::main]
+async fn main() {
+    // Initialize telemetry
+    let _guard = setup_telemetry(
+        "my-service",
+        "production",
+    ).await.expect("failed to initialize telemetry");
+
+    let logger = get_logger("main");
+
+    // Build router with telemetry middleware
+    let app = Router::new()
+        .route("/health", get(health))
+        .route("/api/v1/users", post(create_user))
+        .route("/metrics", get(metrics))
+        .layer(TelemetryLayer::new())
+        .with_state(logger.clone());
+
+    let addr: SocketAddr = "0.0.0.0:8080".parse().unwrap();
+    logger.info("service_starting", &[("port", "8080")]);
+
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn health() -> Json<Value> {
+    Json(json!({ "status": "ok" }))
+}
+
+async fn create_user(
+    State(logger): State<Arc<my_service_telemetry::Logger>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let user_id = body["user_id"].as_str().unwrap_or("unknown");
+    let email = body["email"].as_str().unwrap_or("unknown");
+
+    let ctx = LogContext::new()
+        .with("user_id", user_id)
+        .with("request_path", "/api/v1/users");
+
+    logger.info_ctx(&ctx, "user.creating", &[("user_id", user_id), ("email", email)]);
+
+    // ... business logic ...
+
+    let event = UserCreated::new(user_id, email);
+    logger.info_ctx(&ctx, "user.created", &event.to_fields());
+
+    Json(json!({ "user_id": user_id, "status": "created" }))
+}
+
+async fn metrics() -> String {
+    my_service_telemetry::render_metrics()
+}
+```
+
+**2. Set environment variables:**
+
+```bash
+# development
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=console
+export OTEL_SERVICE_NAME=my-service-local
+export OTEL_TRACES_SAMPLER=always_on
+
+# production
+export MY_SERVICE_TELEMETRY_ENABLED=true
+export MY_SERVICE_LOG_FORMAT=json
+export OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
+export OTEL_TRACES_SAMPLER=parentbased_traceidratio
+export OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+---
+
+## Event Schema Guide
+
+Events are the heart of LDD-Kit. Every business action in your application should emit an event -- this is what makes your logs queryable, your metrics meaningful, and your traces useful.
+
+### Defining Events in `config.yaml`
+
+```yaml
+events:
+  - domain: order
+    events:
+      - name: order.placed
+        fields:
+          order_id: { type: uuid, required: true }
+          customer_id: { type: string, required: true }
+          total_cents: { type: integer, required: true }
+          currency: { type: string, default: "USD" }
+          items_count: { type: integer, required: true }
+      - name: order.fulfilled
+        fields:
+          order_id: { type: uuid, required: true }
+          fulfillment_id: { type: string, required: true }
+          shipped_at: { type: datetime, required: true }
+      - name: order.cancelled
+        fields:
+          order_id: { type: uuid, required: true }
+          reason: { type: enum, values: [customer_request, fraud, out_of_stock] }
+```
+
+### What Gets Generated
+
+For each event, `adapt.py` generates:
+
+**1. JSON Schema** (`event-schemas/order.json`):
+
+```json
+{
+  "$id": "order.placed",
+  "type": "object",
+  "required": ["event_type", "timestamp", "order_id", "customer_id", "total_cents", "items_count"],
+  "properties": {
+    "event_type": { "const": "order.placed" },
+    "event_domain": { "const": "order" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "order_id": { "type": "string", "format": "uuid" },
+    "customer_id": { "type": "string" },
+    "total_cents": { "type": "integer" },
+    "currency": { "type": "string", "default": "USD" },
+    "items_count": { "type": "integer" }
+  }
+}
+```
+
+**2. Language-specific data class** (Python example):
+
+```python
+# my_service/telemetry/schemas/order.py
+from datetime import datetime
+from typing import Literal
+from pydantic import BaseModel, Field
+
+class OrderPlaced(BaseModel):
+    event_type: Literal["order.placed"] = "order.placed"
+    event_domain: Literal["order"] = "order"
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    order_id: str  # uuid format validated by pydantic
+    customer_id: str
+    total_cents: int
+    currency: str = "USD"
+    items_count: int
+
+    def model_dump(self) -> dict:
+        data = super().model_dump()
+        data["timestamp"] = self.timestamp.isoformat() + "Z"
+        return data
+```
+
+**3. Prometheus counter metric**:
+
+```python
+# In metrics.py
+order_placed_total = Counter(
+    "my_service_order_placed_total",
+    "Total number of orders placed",
+    ["currency", "items_count_bucket"],
+)
+```
+
+**4. Grafana panel** (in `service-pipeline.json` dashboard):
+
+A time series panel showing `order.placed` rate by `currency`, auto-generated from the event definition.
+
+### Using Events in Code
+
+```python
+from my_service.telemetry.logging import get_logger, LogContext
+from my_service.telemetry.schemas.order import OrderPlaced
+
+logger = get_logger(__name__)
+
+async def place_order(order_id: str, customer_id: str, items: list):
+    with LogContext(order_id=order_id):
+        total_cents = sum(item.price_cents for item in items)
+
+        event = OrderPlaced(
+            order_id=order_id,
+            customer_id=customer_id,
+            total_cents=total_cents,
+            items_count=len(items),
+        )
+        logger.info("order.placed", **event.model_dump())
+```
+
+### Querying Events
+
+**Cloud Logging (GCP):**
+
+```sql
+-- Count orders by currency in the last hour
+SELECT jsonPayload.currency, COUNT(*) as count
+FROM `project.logs._AllLogs`
+WHERE jsonPayload.event_type = "order.placed"
+  AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
+GROUP BY jsonPayload.currency
+
+-- Find cancelled orders
+SELECT jsonPayload.order_id, jsonPayload.reason
+FROM `project.logs._AllLogs`
+WHERE jsonPayload.event_type = "order.cancelled"
+  AND timestamp > TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+```
+
+**Grafana / Prometheus:**
+
+```promql
+# Order rate by currency
+rate(my_service_order_placed_total[5m])
+
+# Cancellation rate
+rate(my_service_order_cancelled_total[5m])
+
+# Average order value (using log-based metric)
+avg_over_time(logging_googleapis_com_user_my_service_request_duration[1h])
+```
+
+---
+
+## Dashboard & Alert Customization
+
+### Modifying Grafana Dashboards
+
+Dashboard JSON files are generated in `telemetry/dashboards/`. Edit the `.tmpl` files in `core/dashboards/` to change the templates, or edit the generated JSON directly.
+
+**Adding a panel:**
+
+```json
+{
+  "id": "custom-panel-1",
+  "title": "My Custom Metric",
+  "type": "timeseries",
+  "targets": [{
+    "expr": "rate(my_service_custom_event_total[5m])",
+    "legendFormat": "{{ status }}"
+  }],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "reqps",
+      "min": 0
+    }
+  }
+}
+```
+
+**Common panel types:**
+
+| Type | Use For |
+|------|---------|
+| `timeseries` | Rates, durations, counts over time |
+| `stat` | Single current value (active users, queue depth) |
+| `gauge` | Percentage/threshold display (CPU, memory) |
+| `table` | Top-N lists (slowest endpoints, top errors) |
+| `heatmap` | Distribution visualization (latency buckets) |
+
+### Customizing Alert Rules
+
+Alert rules are generated as Prometheus rule groups in `telemetry/alerts/`.
+
+**To add a new alert:**
+
+```yaml
+# telemetry/alerts/business.yml
+groups:
+  - name: my-service-business
+    rules:
+      - alert: HighOrderCancellationRate
+        expr: |
+          (
+            rate(my_service_order_cancelled_total[5m])
+            /
+            rate(my_service_order_placed_total[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: my-service
+        annotations:
+          summary: "High order cancellation rate > 10%"
+          description: "Cancellation rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+          runbook_url: "https://wiki.internal/my-service/runbooks/high-cancellations"
+```
+
+**Alert severity levels:**
+
+| Severity | Response Time | Example |
+|----------|--------------|---------|
+| `critical` | < 5 minutes | Service down, data loss |
+| `warning` | < 30 minutes | Elevated errors, high latency |
+| `info` | Next business day | Unusual patterns, low risk |
+
+---
+
+## Kimi Integration
+
+LDD-Kit includes a prompt template for [Kimi Code](https://kimi.moonshot.cn/) that enables AI-assisted debugging using your telemetry data.
+
+### Setup
+
+```bash
+# Copy the prompt template and fill in your service details
+cp core/prompts/ldd-template.md.tmpl .github/prompts/ldd-debug.md
+
+# Edit the placeholder values:
+#   {{ SERVICE_NAME }}  -> your service name
+#   {{ EVENT_SCHEMAS }} -> paste your events YAML
+#   {{ LOG_QUERIES }}   -> example queries for your platform
+```
+
+### Usage
+
+When an alert fires, paste the following into Kimi:
+
+```markdown
+## LDD Debug Session
+
+**Service:** my-service
+**Alert:** High latency p95 > 5000ms
+**Time:** 2024-01-15T09:23:00Z
+
+### Traces (slowest 5)
+[paste Cloud Trace data]
+
+### Logs (errors in window)
+[paste Cloud Logging query results]
+
+### Metrics
+[paste Prometheus graph screenshots or data]
+
+### Ask Kimi:
+1. What is the root cause of the latency spike?
+2. Which downstream service is responsible?
+3. What remediation actions should I take?
+```
+
+### Subagent Spec
+
+The `telemetry-agent.md` subagent spec configures Kimi to:
+
+1. Parse structured log events using your schemas
+2. Correlate traces with logs via `trace_id`
+3. Suggest metric queries for diagnosis
+4. Recommend runbook actions based on alert labels
+
+---
+
+## Migration from Existing Logging
+
+LDD-Kit provides a gradual migration path from ad-hoc logging.
+
+### From `print()` / `log.Printf()` / `console.log()` / `println!()`
+
+**Step 1: Install the telemetry package** (see [Quick Start](#quick-start))
+
+**Step 2: Replace ad-hoc logging with structured events**
+
+Before:
+
+```python
+# Python
+print(f"User {user_id} created with email {email}")
+```
+
+```go
+// Go
+log.Printf("User %s created with email %s", user_id, email)
+```
+
+```javascript
+// Node.js
+console.log(`User ${user_id} created with email ${email}`);
+```
+
+```rust
+// Rust
+println!("User {} created with email {}", user_id, email);
+```
+
+After:
+
+```python
+# Python
+from my_service.telemetry.logging import get_logger
+from my_service.telemetry.schemas.user import UserCreated
+
+logger = get_logger(__name__)
+event = UserCreated(user_id=user_id, email=email)
+logger.info("user.created", **event.model_dump())
+```
+
+```go
+// Go
+import "my-service/telemetry/logging"
+
+logger.Info(ctx, "user.created", "user_id", user_id, "email", email)
+```
+
+```javascript
+// Node.js
+import { getLogger } from './telemetry';
+const logger = getLogger('users');
+logger.info('user.created', { user_id, email });
+```
+
+```rust
+// Rust
+logger.info("user.created", &[("user_id", user_id), ("email", email)]);
+```
+
+**Step 3: Validate migration with CI**
+
+The CI pipeline will catch any remaining ad-hoc log statements:
+
+```bash
+python scripts/validate_log_schemas.py --source my_service/
+# ERROR: Unstructured log at my_service/users.py:42
+#   print(f"User {user_id} created")
+```
+
+### Migration Tips
+
+| Tip | Description |
+|-----|-------------|
+| Start with new code | Use LDD-Kit for all new features first |
+| Migrate route handlers | Add middleware, then instrument handlers one at a time |
+| Use the CI validator | Let CI catch unstructured logs before they reach main |
+| Keep log levels | Map `debug` -> `logger.debug`, `info` -> `logger.info`, etc. |
+| Batch migration | Migrate one domain at a time (users, then payments, then orders) |
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### Traces not appearing in the trace backend
+
+**Symptoms:** No traces visible in Cloud Trace / Jaeger / X-Ray after requests.
+
+**Diagnosis:**
+
+```bash
+# 1. Check if telemetry is enabled
+echo $MY_SERVICE_TELEMETRY_ENABLED    # Should be "true"
+
+# 2. Check if the trace API is enabled
+gcloud services list --enabled | grep cloudtrace  # GCP
+
+# 3. Check if the service account has trace agent role
+gcloud projects get-iam-policy $PROJECT_ID \
+  --flatten='bindings[].members' \
+  --filter='bindings.role:roles/cloudtrace.agent'
+
+# 4. Enable debug logging for OTel
+export OTEL_LOG_LEVEL=debug
+```
+
+**Common fixes:**
+
+| Cause | Fix |
+|-------|-----|
+| Trace API not enabled | `gcloud services enable cloudtrace.googleapis.com` |
+| Missing service account permission | Add `roles/cloudtrace.agent` |
+| Sampling rate too low | Set `OTEL_TRACES_SAMPLER_ARG=1.0` for testing |
+| Wrong OTLP endpoint | Verify `OTEL_EXPORTER_OTLP_ENDPOINT` |
+
+#### Metrics not appearing in Prometheus / Cloud Monitoring
+
+**Symptoms:** `/metrics` endpoint works but no data in monitoring.
+
+**Diagnosis:**
+
+```bash
+# Check metrics endpoint locally
+curl http://localhost:9090/metrics
+
+# Verify metric names match expected pattern
+grep "my_service_" /tmp/prometheus/*.db 2>/dev/null || true
+```
+
+**Common fixes:**
+
+| Cause | Fix |
+|-------|-----|
+| Monitoring API not enabled | `gcloud services enable monitoring.googleapis.com` |
+| Metric naming mismatch | Ensure metrics use `my_service_` prefix |
+| Scraping misconfigured | Cloud Run auto-scrapes `/metrics`; verify port |
+
+#### High log volume / cost
+
+**Symptoms:** Unexpectedly high logging bills.
+
+**Mitigation:**
+
+```bash
+# Reduce log level
+export MY_SERVICE_LOG_LEVEL=warning
+
+# Exclude health check logs (very high volume)
+# Set in Terraform: see infrastructure/terraform/logging.tf
+```
+
+#### Validation scripts failing in CI
+
+**Symptoms:** GitHub Actions / GitLab CI workflow fails on validation steps.
+
+**Diagnosis:**
+
+```bash
+# Run locally to see detailed output
+python scripts/validate_telemetry.py --min-coverage 80 --source my_service/ 2>&1
+
+# Check if new endpoints were added without instrumentation
+grep -r "def " my_service/api/ | grep -v "__pycache__"
+```
+
+**Common fixes:**
+
+| Cause | Fix |
+|-------|-----|
+| New endpoint without trace span | Add telemetry middleware or manual span |
+| New event type not in schema registry | Register in `telemetry/schemas/__init__.py` |
+| Metric defined in code but not in metrics.py | Add to `MetricsCollector` / metrics module |
+| Dashboard JSON syntax error | Validate JSON with `python -m json.tool` |
+
+#### Slow local startup with telemetry enabled
+
+**Symptoms:** App takes noticeably longer to start when telemetry is on.
+
+**Fix:**
+
+```bash
+# Use the simpler console exporter locally
+export OTEL_EXPORTER_OTLP_ENDPOINT=""
+# This triggers fallback to ConsoleSpanExporter (no network calls)
+
+# Or disable specific instrumentations
+export OTEL_PYTHON_DISABLED_INSTRUMENTATIONS="sqlalchemy,redis"   # Python
+```
+
+---
+
+## Project Structure
+
+```
+ldd-kit/
+├── README.md                          # This file
+├── config.yaml.example                # Example configuration
+├── core/                              # Generic templates (language-agnostic)
+│   ├── event-schemas/
+│   │   └── base.json                  # JSON Schema for BaseEvent
+│   ├── dashboards/
+│   │   ├── service-overview.json.tmpl # Grafana dashboard template
+│   │   ├── service-pipeline.json.tmpl
+│   │   └── service-ai-inference.json.tmpl
+│   ├── alerts/
+│   │   ├── latency.yml.tmpl           # Prometheus alert rule templates
+│   │   ├── error-rate.yml.tmpl
+│   │   └── resource-exhaustion.yml.tmpl
+│   ├── prompts/
+│   │   ├── ldd-template.md.tmpl       # Kimi prompt template
+│   │   └── telemetry-agent.md         # Subagent spec
+│   ├── scripts/
+│   │   ├── validate_telemetry.py      # Generic AST validator
+│   │   ├── validate_log_schemas.py    # Generic schema validator
+│   │   ├── validate_dashboards.py     # Generic dashboard validator
+│   │   ├── check_metrics.py           # Generic metric registry checker
+│   │   └── adapt.py                   # ONE-SCRIPT adaptation tool
+│   ├── ci/
+│   │   ├── github-actions.yml.tmpl    # GitHub Actions workflow template
+│   │   └── gitlab-ci.yml.tmpl         # GitLab CI pipeline template
+│   └── terraform/
+│       ├── monitoring.tf              # Generic GCP monitoring
+│       ├── logging.tf                 # Generic GCP logging
+│       ├── trace.tf                   # Generic Cloud Trace
+│       ├── variables.tf               # All variables
+│       ├── main.tf                    # Provider configuration
+│       └── outputs.tf                 # Useful outputs
+├── adapters/                          # Language-specific implementations
+│   ├── python/
+│   │   └── telemetry/
+│   │       ├── __init__.py
+│   │       ├── logging.py
+│   │       ├── tracing.py
+│   │       ├── metrics.py
+│   │       ├── middleware.py
+│   │       └── remediation.py
+│   ├── go/
+│   │   └── telemetry/
+│   │       ├── logging.go
+│   │       ├── tracing.go
+│   │       ├── metrics.go
+│   │       ├── middleware.go
+│   │       └── remediation.go
+│   ├── nodejs/
+│   │   └── telemetry/
+│   │       ├── index.ts
+│   │       ├── logging.ts
+│   │       ├── tracing.ts
+│   │       ├── metrics.ts
+│   │       ├── middleware.ts
+│   │       └── remediation.ts
+│   └── rust/
+│       └── telemetry/
+│           ├── lib.rs
+│           ├── logging.rs
+│           ├── tracing.rs
+│           ├── metrics.rs
+│           ├── middleware.rs
+│           └── remediation.rs
+└── examples/                          # Complete minimal examples
+    ├── python-fastapi/
+    │   ├── README.md
+    │   ├── main.py
+    │   └── requirements.txt
+    ├── go-gin/
+    │   ├── README.md
+    │   └── main.go
+    ├── nodejs-express/
+    │   ├── README.md
+    │   └── app.ts
+    └── rust-axum/
+        ├── README.md
+        └── main.rs
+```
+
+---
+
+## License
+
+MIT License
+
+Copyright (c) 2024 LDD-Kit Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

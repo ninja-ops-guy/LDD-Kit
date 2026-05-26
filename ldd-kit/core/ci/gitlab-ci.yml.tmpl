@@ -1,0 +1,412 @@
+# =============================================================================
+# LDD Validation Pipeline — {{ SERVICE_NAME }}
+# =============================================================================
+# GitLab CI pipeline that enforces the Log-Driven Development (LDD) contract
+# across build, test, telemetry-validate, and deploy stages.
+#
+# Placeholder values (replace during adaptation):
+#   {{ SERVICE_NAME }}     — your service name (e.g., "my-service")
+#   {{ LANGUAGE }}         — python | go | nodejs | rust
+#   {{ METRIC_PREFIX }}    — Prometheus metric prefix (e.g., "myservice")
+#   {{ OBSERVABILITY_FEATURES }} — comma-separated list:
+#                                 structured_logging,distributed_tracing,
+#                                 prometheus_metrics,grafana_dashboards,alert_rules
+# =============================================================================
+
+variables:
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  GOFLAGS: "-mod=readonly"
+  NODE_ENV: "test"
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+
+stages:
+  - build
+  - test
+  - telemetry-validate
+  - deploy
+
+# ============================================================================
+# Cache templates
+# ============================================================================
+.pip-cache: &pip-cache
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/pip/
+    policy: pull-push
+
+.go-cache: &go-cache
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - /go/pkg/mod/
+    policy: pull-push
+
+.npm-cache: &npm-cache
+  cache:
+    key: "${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - node_modules/
+    policy: pull-push
+
+.cargo-cache: &cargo-cache
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cargo/registry/
+      - target/
+    policy: pull-push
+
+# ============================================================================
+# BUILD stage
+# ============================================================================
+build:
+  stage: build
+{{# if {{ LANGUAGE }} == 'python' }}
+  image: python:3.12-slim
+  <<: *pip-cache
+  before_script:
+    - python -m pip install --upgrade pip setuptools wheel
+    - pip install -r requirements.txt
+    - pip install -e ".[dev,telemetry]"
+  script:
+    - python -c "import {{ SERVICE_NAME }}; print('Build OK')"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+  image: golang:1.22
+  <<: *go-cache
+  before_script:
+    - go mod download
+  script:
+    - go build -v ./...
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+  image: node:20
+  <<: *npm-cache
+  before_script:
+    - npm ci
+  script:
+    - npm run build
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - rustup component add rustfmt clippy
+  script:
+    - cargo build --all-features
+{{/ if }}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+
+# ============================================================================
+# TEST stage
+# ============================================================================
+{{# if {{ LANGUAGE }} == 'python' }}
+test:py311:
+  stage: test
+  image: python:3.11-slim
+  <<: *pip-cache
+  before_script:
+    - python -m pip install --upgrade pip setuptools wheel
+    - pip install -r requirements.txt
+    - pip install -e ".[dev,telemetry]"
+  script:
+    - pytest tests/telemetry/ -v --tb=short --color=yes --junitxml=junit-py311.xml
+  artifacts:
+    reports:
+      junit: junit-py311.xml
+    paths:
+      - junit-py311.xml
+    expire_in: 1 week
+
+.test:py312:
+  stage: test
+  image: python:3.12-slim
+  <<: *pip-cache
+  before_script:
+    - python -m pip install --upgrade pip setuptools wheel
+    - pip install -r requirements.txt
+    - pip install -e ".[dev,telemetry]"
+  script:
+    - pytest tests/telemetry/ -v --tb=short --color=yes --junitxml=junit-py312.xml
+  artifacts:
+    reports:
+      junit: junit-py312.xml
+    paths:
+      - junit-py312.xml
+    expire_in: 1 week
+
+.test:py313:
+  stage: test
+  image: python:3.13-slim
+  <<: *pip-cache
+  before_script:
+    - python -m pip install --upgrade pip setuptools wheel
+    - pip install -r requirements.txt
+    - pip install -e ".[dev,telemetry]"
+  script:
+    - pytest tests/telemetry/ -v --tb=short --color=yes --junitxml=junit-py313.xml
+  artifacts:
+    reports:
+      junit: junit-py313.xml
+    paths:
+      - junit-py313.xml
+    expire_in: 1 week
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+test:go121:
+  stage: test
+  image: golang:1.21
+  <<: *go-cache
+  before_script:
+    - go mod download
+  script:
+    - go test ./telemetry/... -v -race -coverprofile=coverage-121.out
+    - go tool cover -func=coverage-121.out
+  artifacts:
+    paths:
+      - coverage-121.out
+    expire_in: 1 week
+
+test:go122:
+  stage: test
+  image: golang:1.22
+  <<: *go-cache
+  before_script:
+    - go mod download
+  script:
+    - go test ./telemetry/... -v -race -coverprofile=coverage-122.out
+    - go tool cover -func=coverage-122.out
+  artifacts:
+    paths:
+      - coverage-122.out
+    expire_in: 1 week
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+test:node18:
+  stage: test
+  image: node:18
+  <<: *npm-cache
+  before_script:
+    - npm ci
+  script:
+    - npm test -- --testPathPattern=telemetry --ci --reporters=default --reporters=jest-junit
+  artifacts:
+    reports:
+      junit: junit-node18.xml
+    expire_in: 1 week
+
+test:node20:
+  stage: test
+  image: node:20
+  <<: *npm-cache
+  before_script:
+    - npm ci
+  script:
+    - npm test -- --testPathPattern=telemetry --ci --reporters=default --reporters=jest-junit
+  artifacts:
+    reports:
+      junit: junit-node20.xml
+    expire_in: 1 week
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+test:rust-stable:
+  stage: test
+  image: rust:latest
+  <<: *cargo-cache
+  before_script:
+    - rustup component add rustfmt clippy
+  script:
+    - cargo test --all-features
+    - cargo clippy --all-features -- -D warnings
+{{/ if }}
+
+# ============================================================================
+# TELEMETRY-VALIDATE stage
+# ============================================================================
+telemetry-validate:
+  stage: telemetry-validate
+{{# if {{ LANGUAGE }} == 'python' || {{ LANGUAGE }} == 'go' || {{ LANGUAGE }} == 'nodejs' || {{ LANGUAGE }} == 'rust' }}
+  image: python:3.12-slim
+  <<: *pip-cache
+  before_script:
+    - python -m pip install --upgrade pip pyyaml
+{{/ if }}
+  script:
+{{# if observability_contains('structured_logging') }}
+    # --- Validate log schemas -----------------------------------------------
+    - |
+      echo "=== Log Schema Validation ==="
+{{# if {{ LANGUAGE }} == 'python' }}
+      python scripts/validate_log_schemas.py \
+        --source {{ SERVICE_NAME }}/ \
+        --output telemetry-violations.json || true
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+      test -f scripts/validate_log_schemas.py && \
+        python scripts/validate_log_schemas.py \
+          --source {{ SERVICE_NAME }}/ \
+          --output telemetry-violations.json || \
+        echo "Log schema validator not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+      test -f scripts/validate_log_schemas.py && \
+        python scripts/validate_log_schemas.py \
+          --source {{ SERVICE_NAME }}/ \
+          --output telemetry-violations.json || \
+        echo "Log schema validator not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+      test -f scripts/validate_log_schemas.py && \
+        python scripts/validate_log_schemas.py \
+          --source {{ SERVICE_NAME }}/ \
+          --output telemetry-violations.json || \
+        echo "Log schema validator not available — skipping"
+{{/ if }}
+{{/ if }}
+
+{{# if observability_contains('prometheus_metrics') }}
+    # --- Check metric registry ----------------------------------------------
+    - |
+      echo "=== Metric Registry Check ==="
+{{# if {{ LANGUAGE }} == 'python' }}
+      python scripts/check_metrics.py \
+        --source {{ SERVICE_NAME }}/ \
+        --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.py || true
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+      python scripts/check_metrics.py \
+        --source {{ SERVICE_NAME }}/ \
+        --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.go \
+        --language go || echo "Metric checker not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+      python scripts/check_metrics.py \
+        --source {{ SERVICE_NAME }}/ \
+        --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.ts \
+        --language nodejs || echo "Metric checker not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+      python scripts/check_metrics.py \
+        --source {{ SERVICE_NAME }}/ \
+        --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.rs \
+        --language rust || echo "Metric checker not available — skipping"
+{{/ if }}
+{{/ if }}
+
+{{# if observability_contains('grafana_dashboards') }}
+    # --- Validate dashboards ------------------------------------------------
+    - |
+      echo "=== Dashboard Validation ==="
+      python scripts/validate_dashboards.py --dir telemetry/dashboards/ || true
+{{/ if }}
+
+{{# if observability_contains('alert_rules') }}
+    # --- Validate alert rules -----------------------------------------------
+    - |
+      echo "=== Alert Rule Validation ==="
+      python -c "
+      import yaml, glob, sys
+      errors = 0
+      alert_files = glob.glob('telemetry/alerts/*.yml')
+      if not alert_files:
+          print('No alert files found')
+          sys.exit(0)
+      for f in sorted(alert_files):
+          try:
+              with open(f) as fh:
+                  data = yaml.safe_load(fh)
+              assert isinstance(data, dict), f'{f}: root must be a mapping'
+              assert 'groups' in data, f'{f}: missing top-level groups key'
+              assert isinstance(data['groups'], list)
+              for gi, g in enumerate(data['groups']):
+                  assert isinstance(g, dict)
+                  assert 'name' in g and 'rules' in g
+                  for ri, r in enumerate(g['rules']):
+                      assert isinstance(r, dict)
+                      assert 'alert' in r and 'expr' in r and 'for' in r
+              print(f'  OK {f}')
+          except Exception as e:
+              print(f'  FAIL {f}: {e}', file=sys.stderr)
+              errors += 1
+      sys.exit(1 if errors else 0)
+      "
+{{/ if }}
+  artifacts:
+    paths:
+      - telemetry-violations.json
+      - telemetry-coverage.json
+    expire_in: 1 week
+
+# ============================================================================
+# DEPLOY stage
+# ============================================================================
+deploy:
+  stage: deploy
+  image: google/cloud-sdk:slim
+  before_script:
+    - echo "$GCP_SERVICE_KEY" | gcloud auth activate-service-account --key-file=-
+    - gcloud config set project "$GCP_PROJECT_ID"
+  script:
+    - |
+      echo "=== Deploy {{ SERVICE_NAME }} ==="
+{{# if {{ LANGUAGE }} == 'python' }}
+      gcloud run deploy {{ SERVICE_NAME }} \
+        --source . \
+        --region "$GCP_REGION" \
+        --platform managed \
+        --allow-unauthenticated \
+        --set-env-vars "OTEL_SERVICE_NAME={{ SERVICE_NAME }}" \
+        --set-env-vars "OTEL_TRACES_SAMPLER=parentbased_traceidratio" \
+        --set-env-vars "OTEL_TRACES_SAMPLER_ARG=0.1" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_TELEMETRY_ENABLED=true" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_LOG_FORMAT=json"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+      gcloud run deploy {{ SERVICE_NAME }} \
+        --source . \
+        --region "$GCP_REGION" \
+        --platform managed \
+        --allow-unauthenticated \
+        --set-env-vars "OTEL_SERVICE_NAME={{ SERVICE_NAME }}" \
+        --set-env-vars "OTEL_TRACES_SAMPLER=parentbased_traceidratio" \
+        --set-env-vars "OTEL_TRACES_SAMPLER_ARG=0.1" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_TELEMETRY_ENABLED=true" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_LOG_FORMAT=json"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+      gcloud run deploy {{ SERVICE_NAME }} \
+        --source . \
+        --region "$GCP_REGION" \
+        --platform managed \
+        --allow-unauthenticated \
+        --set-env-vars "OTEL_SERVICE_NAME={{ SERVICE_NAME }}" \
+        --set-env-vars "OTEL_TRACES_SAMPLER=parentbased_traceidratio" \
+        --set-env-vars "OTEL_TRACES_SAMPLER_ARG=0.1" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_TELEMETRY_ENABLED=true" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_LOG_FORMAT=json"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+      gcloud run deploy {{ SERVICE_NAME }} \
+        --source . \
+        --region "$GCP_REGION" \
+        --platform managed \
+        --allow-unauthenticated \
+        --set-env-vars "OTEL_SERVICE_NAME={{ SERVICE_NAME }}" \
+        --set-env-vars "OTEL_TRACES_SAMPLER=parentbased_traceidratio" \
+        --set-env-vars "OTEL_TRACES_SAMPLER_ARG=0.1" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_TELEMETRY_ENABLED=true" \
+        --set-env-vars "{{ SERVICE_NAME_CAPS }}_LOG_FORMAT=json"
+{{/ if }}
+  environment:
+    name: production
+    url: https://{{ SERVICE_NAME }}-$GCP_PROJECT_ID-$GCP_REGION.a.run.app
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  when: manual

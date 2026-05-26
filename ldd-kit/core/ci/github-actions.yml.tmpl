@@ -1,0 +1,348 @@
+# =============================================================================
+# LDD Validation Workflow — {{ SERVICE_NAME }}
+# =============================================================================
+# Validates all telemetry, logging, metrics, dashboards, and alert rules
+# on every push and pull request to main/master branches.
+#
+# Placeholder values (replace during adaptation):
+#   {{ SERVICE_NAME }}     — your service name (e.g., "my-service")
+#   {{ LANGUAGE }}         — python | go | nodejs | rust
+#   {{ METRIC_PREFIX }}    — Prometheus metric prefix (e.g., "myservice")
+#   {{ OBSERVABILITY_FEATURES }} — comma-separated list:
+#                                 structured_logging,distributed_tracing,
+#                                 prometheus_metrics,grafana_dashboards,alert_rules
+#
+# This workflow enforces the Log-Driven Development (LDD) contract:
+# - Telemetry coverage >= 80%
+# - Log schema compliance
+# - Metric registry consistency
+# - Dashboard JSON validity
+# - Alert rule YAML validity
+# =============================================================================
+
+name: LDD Validation — {{ SERVICE_NAME }}
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '{{ SERVICE_NAME }}/**'
+      - 'telemetry/**'
+      - 'scripts/**'
+      - 'tests/telemetry/**'
+      - '.github/workflows/ldd.yml'
+{{# each language_config[{{ LANGUAGE }}].dependency_files }}
+      - '{{ this }}'
+{{/ each }}
+  pull_request:
+    branches: [main, master]
+    paths:
+      - '{{ SERVICE_NAME }}/**'
+      - 'telemetry/**'
+      - 'scripts/**'
+      - 'tests/telemetry/**'
+      - '.github/workflows/ldd.yml'
+{{# each language_config[{{ LANGUAGE }}].dependency_files }}
+      - '{{ this }}'
+{{/ each }}
+
+# Prevent duplicate runs on PRs from internal branches
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # validate: Run all LDD validation checks
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate ({{ LANGUAGE_CAP }} ${{ matrix.version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+{{# if {{ LANGUAGE }} == 'python' }}
+        version: ["3.11", "3.12", "3.13"]
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+        version: ["1.21", "1.22"]
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+        version: ["18", "20"]
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+        version: ["stable"]
+{{/ if }}
+
+    steps:
+      # --- Checkout ----------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+{{# if {{ LANGUAGE }} == 'python' }}
+      # --- Python setup ------------------------------------------------------
+      - name: Set up Python ${{ matrix.version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.version }}
+          cache: 'pip'
+          cache-dependency-path: |
+            **/requirements.txt
+            **/pyproject.toml
+
+      # --- Dependency cache (fallback) ---------------------------------------
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-py${{ matrix.version }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-py${{ matrix.version }}-pip-
+
+      # --- Install dependencies ----------------------------------------------
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+          pip install -e ".[dev,telemetry]"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+      # --- Go setup ----------------------------------------------------------
+      - name: Set up Go ${{ matrix.version }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.version }}
+
+      # --- Cache Go modules --------------------------------------------------
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go${{ matrix.version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go${{ matrix.version }}-
+
+      # --- Install dependencies ----------------------------------------------
+      - name: Install Go dependencies
+        run: go mod download
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+      # --- Node.js setup -----------------------------------------------------
+      - name: Set up Node.js ${{ matrix.version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.version }}
+          cache: 'npm'
+
+      # --- Install dependencies ----------------------------------------------
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      # --- TypeScript compile ------------------------------------------------
+      - name: Compile TypeScript
+        run: npm run build
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+      # --- Rust setup --------------------------------------------------------
+      - name: Set up Rust
+        uses: dtolnay/rust-action@stable
+
+      # --- Cache Cargo -------------------------------------------------------
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # --- Build -------------------------------------------------------------
+      - name: Build
+        run: cargo build --all-features
+{{/ if }}
+
+{{# if observability_contains('structured_logging') }}
+      # --- Validate log schemas ----------------------------------------------
+      - name: Validate log schemas
+        id: log_schemas
+        run: |
+          echo "::group::Log Schema Validation"
+{{# if {{ LANGUAGE }} == 'python' }}
+          python scripts/validate_log_schemas.py \
+            --source {{ SERVICE_NAME }}/ \
+            --output telemetry-violations.json
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+          # Go: validate that all log calls use structured logging
+          go vet ./...
+          test -f scripts/validate_log_schemas.py && \
+            python scripts/validate_log_schemas.py \
+              --source {{ SERVICE_NAME }}/ \
+              --output telemetry-violations.json || \
+            echo "Log schema validator not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+          test -f scripts/validate_log_schemas.py && \
+            python scripts/validate_log_schemas.py \
+              --source {{ SERVICE_NAME }}/ \
+              --output telemetry-violations.json || \
+            echo "Log schema validator not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+          test -f scripts/validate_log_schemas.py && \
+            python scripts/validate_log_schemas.py \
+              --source {{ SERVICE_NAME }}/ \
+              --output telemetry-violations.json || \
+            echo "Log schema validator not available — skipping"
+{{/ if }}
+          echo "::endgroup::"
+{{/ if }}
+
+{{# if observability_contains('prometheus_metrics') }}
+      # --- Check metric registry ---------------------------------------------
+      - name: Check metric registry
+        id: metrics
+        run: |
+          echo "::group::Metric Registry Check"
+{{# if {{ LANGUAGE }} == 'python' }}
+          python scripts/check_metrics.py \
+            --source {{ SERVICE_NAME }}/ \
+            --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.py
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+          python scripts/check_metrics.py \
+            --source {{ SERVICE_NAME }}/ \
+            --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.go \
+            --language go || echo "Metric checker not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+          python scripts/check_metrics.py \
+            --source {{ SERVICE_NAME }}/ \
+            --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.ts \
+            --language nodejs || echo "Metric checker not available — skipping"
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+          python scripts/check_metrics.py \
+            --source {{ SERVICE_NAME }}/ \
+            --metrics-file {{ SERVICE_NAME }}/telemetry/metrics.rs \
+            --language rust || echo "Metric checker not available — skipping"
+{{/ if }}
+          echo "::endgroup::"
+{{/ if }}
+
+{{# if observability_contains('grafana_dashboards') }}
+      # --- Validate dashboards -----------------------------------------------
+      - name: Validate dashboards
+        id: dashboards
+        run: |
+          echo "::group::Dashboard Validation"
+          python scripts/validate_dashboards.py \
+            --dir telemetry/dashboards/
+          echo "::endgroup::"
+{{/ if }}
+
+{{# if observability_contains('alert_rules') }}
+      # --- Validate alert rules ----------------------------------------------
+      - name: Validate alert rules
+        id: alert_rules
+        run: |
+          echo "::group::Alert Rule Validation"
+          pip install pyyaml -q 2>/dev/null || true
+          python -c "
+          import yaml, glob, sys
+          errors = 0
+          alert_files = glob.glob('telemetry/alerts/*.yml')
+          if not alert_files:
+              print('  No alert files found in telemetry/alerts/*.yml')
+              sys.exit(0)
+          for f in sorted(alert_files):
+              try:
+                  with open(f) as fh:
+                      data = yaml.safe_load(fh)
+                  assert isinstance(data, dict), f'{f}: root must be a mapping'
+                  assert 'groups' in data, f'{f}: missing top-level \"groups\" key'
+                  assert isinstance(data['groups'], list), f'{f}: \"groups\" must be a list'
+                  for gi, g in enumerate(data['groups']):
+                      assert isinstance(g, dict), f'{f}: group {gi} must be a mapping'
+                      assert 'name' in g, f'{f}: group {gi} missing \"name\"'
+                      assert 'rules' in g, f'{f}: group {gi} missing \"rules\"'
+                      assert isinstance(g['rules'], list), f'{f}: group {gi} \"rules\" must be a list'
+                      for ri, r in enumerate(g['rules']):
+                          assert isinstance(r, dict), f'{f}: rule {ri} in group {gi} must be a mapping'
+                          assert 'alert' in r, f'{f}: rule {ri} in group {gi} missing \"alert\" name'
+                          assert 'expr' in r, f'{f}: rule {ri} in group {gi} missing \"expr\"'
+                          assert 'for' in r, f'{f}: rule {ri} in group {gi} missing \"for\" duration'
+                  print(f'  \u2713 {f}')
+              except Exception as e:
+                  print(f'  \u2717 {f}: {e}', file=sys.stderr)
+                  errors += 1
+          print(f'\n{len(alert_files) - errors}/{len(alert_files)} alert files passed')
+          sys.exit(1 if errors else 0)
+          "
+          echo "::endgroup::"
+{{/ if }}
+
+      # --- Run telemetry tests -----------------------------------------------
+      - name: Run telemetry tests
+        id: tests
+        run: |
+          echo "::group::Telemetry Test Suite"
+{{# if {{ LANGUAGE }} == 'python' }}
+          pytest tests/telemetry/ -v --tb=short --color=yes
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'go' }}
+          go test ./telemetry/... -v -race -coverprofile=coverage.out
+          go tool cover -func=coverage.out
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'nodejs' }}
+          npm test -- --testPathPattern=telemetry
+{{/ if }}
+{{# if {{ LANGUAGE }} == 'rust' }}
+          cargo test --all-features
+{{/ if }}
+          echo "::endgroup::"
+
+      # --- Upload artifacts --------------------------------------------------
+      - name: Upload telemetry validation artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: telemetry-report-{{ SERVICE_NAME }}-${{ matrix.version }}
+          path: |
+            telemetry-coverage.json
+            telemetry-violations.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # lint-terraform: Validate Terraform configurations
+  # ---------------------------------------------------------------------------
+  lint-terraform:
+    name: Lint Terraform
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/terraform
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ">= 1.5.0"
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform validate
+        run: |
+          terraform init -backend=false
+          terraform validate

@@ -1,0 +1,35 @@
+groups:
+  - name: {{ METRIC_PREFIX }}_resource_exhaustion
+    rules:
+      - alert: {{ SERVICE_NAME | capitalize }}HighMemoryUsage
+        expr: ({{ METRIC_PREFIX }}_memory_usage_bytes / {{ METRIC_PREFIX }}_memory_limit_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: {{ SERVICE_NAME }}
+        annotations:
+          summary: "{{ SERVICE_NAME | capitalize }} memory usage is high"
+          description: "Memory usage is {% raw %}{{ $value | humanizePercentage }}{% endraw %} for the last 5 minutes"
+          runbook_url: "https://wiki.internal/{{ SERVICE_NAME }}/runbooks/high-memory-usage"
+
+      - alert: {{ SERVICE_NAME | capitalize }}HighConnectionCount
+        expr: {{ METRIC_PREFIX }}_active_connections > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: {{ SERVICE_NAME }}
+        annotations:
+          summary: "{{ SERVICE_NAME | capitalize }} has too many active connections"
+          description: "Active connections count is {% raw %}{{ $value }}{% endraw %} (threshold: 1000)"
+          runbook_url: "https://wiki.internal/{{ SERVICE_NAME }}/runbooks/high-connection-count"
+
+      - alert: {{ SERVICE_NAME | capitalize }}QueueDepthHigh
+        expr: {{ METRIC_PREFIX }}_queue_depth > 100
+        for: 10m
+        labels:
+          severity: critical
+          service: {{ SERVICE_NAME }}
+        annotations:
+          summary: "{{ SERVICE_NAME | capitalize }} queue depth is critically high"
+          description: "Queue depth is {% raw %}{{ $value }}{% endraw %} (threshold: 100) for the last 10 minutes"
+          runbook_url: "https://wiki.internal/{{ SERVICE_NAME }}/runbooks/queue-depth-high"

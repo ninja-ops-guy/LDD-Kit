@@ -1,0 +1,13 @@
+groups:
+  - name: {{ METRIC_PREFIX }}_error_rate
+    rules:
+      - alert: {{ SERVICE_NAME | capitalize }}HighErrorRate
+        expr: rate({{ METRIC_PREFIX }}_requests_total{status=~"5.."}[2m]) / rate({{ METRIC_PREFIX }}_requests_total[2m]) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+          service: {{ SERVICE_NAME }}
+        annotations:
+          summary: "{{ SERVICE_NAME | capitalize }} error rate is critically high"
+          description: "Error rate is {% raw %}{{ $value | humanizePercentage }}{% endraw %} for the last 2 minutes"
+          runbook_url: "https://wiki.internal/{{ SERVICE_NAME }}/runbooks/high-error-rate"

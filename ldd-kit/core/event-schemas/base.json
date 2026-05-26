@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BaseEvent",
+  "type": "object",
+  "required": ["event_type", "timestamp"],
+  "properties": {
+    "event_type": { "type": "string", "description": "Dot-notation event name, e.g. user.created" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "trace_id": { "type": "string", "nullable": true },
+    "span_id": { "type": "string", "nullable": true },
+    "tenant_id": { "type": "string", "nullable": true },
+    "user_id": { "type": "string", "nullable": true },
+    "severity": { "type": "string", "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] }
+  }
+}

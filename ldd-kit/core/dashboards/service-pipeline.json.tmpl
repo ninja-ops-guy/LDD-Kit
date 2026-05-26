@@ -1,0 +1,278 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "{{ DASHBOARD_UID_PREFIX }}-pipeline",
+    "title": "{{ SERVICE_NAME | capitalize }} — Pipeline",
+    "tags": ["{{ SERVICE_NAME }}", "pipeline", "async"],
+    "timezone": "utc",
+    "schemaVersion": 39,
+    "refresh": "30s",
+    "time": {
+      "from": "now-3h",
+      "to": "now"
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {
+            "text": "prometheus",
+            "value": "prometheus"
+          },
+          "hide": 0
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Stage Duration P95",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate({{ METRIC_PREFIX }}_pipeline_stage_duration_seconds_bucket[5m]))",
+            "legendFormat": "{% raw %}{{ stage }}{% endraw %} — p95",
+            "refId": "A",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate({{ METRIC_PREFIX }}_pipeline_stage_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{ stage }} — p50",
+            "refId": "B",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 5,
+              "gradientMode": "opacity",
+              "showPoints": "auto",
+              "spanNulls": false
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 10, "color": "yellow"},
+                {"value": 60, "color": "red"}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"]},
+          "tooltip": {"mode": "multi", "sort": "desc"}
+        }
+      },
+      {
+        "id": 2,
+        "title": "Items Processed per Hour",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}},
+        "targets": [
+          {
+            "expr": "increase({{ METRIC_PREFIX }}_pipeline_items_processed_total[1h])",
+            "legendFormat": "{{ stage }}/hour",
+            "refId": "A",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 15,
+              "gradientMode": "hue",
+              "showPoints": "auto",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max", "sum"]},
+          "tooltip": {"mode": "single", "sort": "desc"}
+        }
+      },
+      {
+        "id": 3,
+        "title": "Pipeline Success Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}},
+        "targets": [
+          {
+            "expr": "rate({{ METRIC_PREFIX }}_pipeline_items_processed_total{status!=\"failed\"}[5m]) / rate({{ METRIC_PREFIX }}_pipeline_items_processed_total[5m])",
+            "legendFormat": "{% raw %}{{ pipeline }}{% endraw %} success rate",
+            "refId": "A",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "opacity",
+              "showPoints": "never",
+              "spanNulls": false
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "red"},
+                {"value": 0.95, "color": "yellow"},
+                {"value": 0.99, "color": "green"}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max", "min"]},
+          "tooltip": {"mode": "multi", "sort": "desc"}
+        }
+      },
+      {
+        "id": 4,
+        "title": "Queue Depth",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}},
+        "targets": [
+          {
+            "expr": "{{ METRIC_PREFIX }}_queue_depth",
+            "legendFormat": "{% raw %}{{ queue }}{% endraw %} — depth",
+            "refId": "A",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 15,
+              "gradientMode": "opacity",
+              "showPoints": "auto",
+              "spanNulls": false
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 50, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"]},
+          "tooltip": {"mode": "multi", "sort": "desc"}
+        }
+      },
+      {
+        "id": 5,
+        "title": "Worker Pool Utilization",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}},
+        "targets": [
+          {
+            "expr": "{{ METRIC_PREFIX }}_workers_busy / {{ METRIC_PREFIX }}_workers_total",
+            "legendFormat": "{% raw %}{{ pool }}{% endraw %} — utilization",
+            "refId": "A",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "opacity",
+              "showPoints": "never",
+              "spanNulls": false
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 0.7, "color": "yellow"},
+                {"value": 0.9, "color": "red"}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max", "lastNotNull"]},
+          "tooltip": {"mode": "multi", "sort": "desc"}
+        }
+      },
+      {
+        "id": 6,
+        "title": "Pipeline Errors",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}},
+        "targets": [
+          {
+            "expr": "rate({{ METRIC_PREFIX }}_pipeline_errors_total[5m])",
+            "legendFormat": "{{ stage }} — errors/sec",
+            "refId": "A",
+            "datasource": {"type": "prometheus", "uid": {% raw %}"${datasource}"{% endraw %}}
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 15,
+              "gradientMode": "opacity",
+              "showPoints": "auto",
+              "spanNulls": false
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 1, "color": "yellow"},
+                {"value": 10, "color": "red"}
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {"displayMode": "table", "placement": "right", "calcs": ["mean", "max", "sum"]},
+          "tooltip": {"mode": "multi", "sort": "desc"}
+        }
+      }
+    ]
+  },
+  "overwrite": true
+}

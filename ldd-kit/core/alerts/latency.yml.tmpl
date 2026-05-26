@@ -1,0 +1,13 @@
+groups:
+  - name: {{ METRIC_PREFIX }}_latency
+    rules:
+      - alert: {{ SERVICE_NAME | capitalize }}HighLatency
+        expr: histogram_quantile(0.95, rate({{ METRIC_PREFIX }}_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: {{ SERVICE_NAME }}
+        annotations:
+          summary: "{{ SERVICE_NAME | capitalize }} p95 latency is high"
+          description: "p95 latency is {% raw %}{{ $value }}{% endraw %}s for the last 5 minutes"
+          runbook_url: "https://wiki.internal/{{ SERVICE_NAME }}/runbooks/high-latency"

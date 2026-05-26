@@ -1,0 +1,113 @@
+# Telemetry Requirements for {{ SERVICE_NAME | capitalize }}
+
+Every feature implementation MUST include:
+
+## Required Telemetry
+1. **Structured Log**: Emit `event_type: {feature}.{action}` with all required fields
+2. **OTEL Span**: Add span for any external API call > 100ms or complex workflow
+3. **Metric**: Record `{{ METRIC_PREFIX }}_{feature}_{action}_duration_seconds` histogram + `{{ METRIC_PREFIX }}_{feature}_{action}_total` counter
+4. **Correlation IDs**: Include trace_id, span_id{% if multi_tenant %}, tenant_id{% endif %} in all log entries
+5. **Event Schema**: Define schema in `telemetry/schemas/{feature}.{ext}`
+6. **Alert Rule**: Add if failure rate > 1% or latency p95 > 5s
+7. **Dashboard Panel**: Add panel to relevant Grafana dashboard JSON if user-facing
+
+## Log Format
+{% if language == "python" %}
+```python
+logger.info(
+    "action_completed",
+    event_type="feature.action",
+    entity_id=entity_id,
+    duration_seconds=duration,
+    {% if multi_tenant %}tenant_id=tenant_id,
+    {% endif %}trace_id=trace_id,
+)
+```
+{% elif language == "go" %}
+```go
+logger.Info("action_completed",
+    zap.String("event_type", "feature.action"),
+    zap.String("entity_id", entityID),
+    zap.Float64("duration_seconds", duration),
+    {% if multi_tenant %}zap.String("tenant_id", tenantID),
+    {% endif %}zap.String("trace_id", traceID),
+)
+```
+{% elif language == "nodejs" %}
+```typescript
+logger.info("action_completed", {
+    event_type: "feature.action",
+    entity_id: entityId,
+    duration_seconds: duration,
+    {% if multi_tenant %}tenant_id: tenantId,
+    {% endif %}trace_id: traceId,
+});
+```
+{% elif language == "rust" %}
+```rust
+tracing::info!(
+    event_type = "feature.action",
+    entity_id = %entity_id,
+    duration_seconds = %duration,
+    {% if multi_tenant %}tenant_id = %tenant_id,
+    {% endif %}trace_id = %trace_id,
+    "action_completed"
+);
+```
+{% endif %}
+
+## Span Format
+{% if language == "python" %}
+```python
+with tracer.start_as_current_span("feature.action") as span:
+    span.set_attribute("entity.id", entity_id)
+    # ... work ...
+```
+{% elif language == "go" %}
+```go
+cctx, span := tracer.Start(ctx, "feature.action")
+span.SetAttributes(attribute.String("entity.id", entityID))
+defer span.End()
+```
+{% elif language == "nodejs" %}
+```typescript
+const span = tracer.startSpan("feature.action");
+span.setAttribute("entity.id", entityId);
+// ... work ...
+span.end();
+```
+{% elif language == "rust" %}
+```rust
+let span = info_span!("feature.action", entity.id = %entity_id);
+let _guard = span.enter();
+// ... work ...
+```
+{% endif %}
+
+## Metric Format
+{% if language == "python" %}
+```python
+METRICS.record_feature_action(duration=duration_seconds)
+METRICS.record_custom_metric(labels={"key": "value"}, value=count)
+```
+{% elif language == "go" %}
+```go
+metrics.FeatureActionDuration.Observe(duration)
+metrics.CustomMetric.WithLabelValues("value").Add(float64(count))
+```
+{% elif language == "nodejs" %}
+```typescript
+metrics.featureActionDuration.observe(duration);
+metrics.customMetric.labels("value").inc(count);
+```
+{% elif language == "rust" %}
+```rust
+metrics::FEATURE_ACTION_DURATION.observe(duration);
+metrics::CUSTOM_METRIC.with_label_values(&["value"]).inc_by(count);
+```
+{% endif %}
+
+## CI Enforcement
+- Run `python core/scripts/validate_telemetry.py --language {{ language }} --min-coverage 80`
+- Run `python core/scripts/validate_log_schemas.py --language {{ language }}`
+- Run `python core/scripts/check_metrics.py --language {{ language }}`

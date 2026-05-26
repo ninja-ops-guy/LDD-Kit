@@ -1,0 +1,50 @@
+# LDD-Kit Service Configuration
+# Copy this file, customize it, then run: python core/scripts/adapt.py --config config.yaml
+
+service:
+  name: my-service              # Your service name (lowercase, kebab-case)
+  language: python              # python | go | nodejs | rust
+  framework: fastapi            # fastapi | flask | gin | echo | express | axum | actix
+  platform: gcp                 # gcp | aws | azure | baremetal
+
+features:
+  ai_inference: false           # Enable AI-specific dashboards
+  multi_tenant: false           # Enable tenant context propagation
+  auth: false                   # Enable auth event schemas
+  async_workflows: false        # Enable workflow/pipeline dashboards
+
+observability:
+  structured_logging: true
+  distributed_tracing: true
+  prometheus_metrics: true
+  grafana_dashboards:
+    enabled: true
+    format: json             # json | python (grafanalib)
+  alert_rules: true
+  ci_enforcement: true
+
+events:
+  # Define your domain events here. Each event auto-generates:
+  # - Pydantic/dataclass schema
+  # - Structured log helper
+  # - Metric counter
+  - domain: user
+    events:
+      - name: user.created
+        fields:
+          user_id: { type: string, required: true }
+          email: { type: string, required: true, pii: true }
+      - name: user.login
+        fields:
+          user_id: { type: string, required: true }
+          method: { type: string, required: true }
+      - name: user.logout
+  - domain: payment
+    events:
+      - name: payment.processed
+        fields:
+          amount_cents: { type: integer, required: true }
+          currency: { type: string, required: true }
+      - name: payment.failed
+        fields:
+          error_code: { type: string, required: true }
